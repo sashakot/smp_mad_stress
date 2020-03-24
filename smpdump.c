@@ -43,14 +43,17 @@
 
 #include <infiniband/mad.h>
 #include <infiniband/umad.h>
+#include <pthread.h>
 
 #include <sys/time.h>
 
 #include "ibdiag_common.h"
 //#include <infiniband/ibnetdisc.h>
 
-#define MAX_TARGET_QUEUE_DEPTH 128
-#define MAX_SOURCE_QUEUE_DEPTH 1024
+#define MAX_TARGET_QUEUE_DEPTH 512
+#define MAX_SOURCE_QUEUE_DEPTH 2048
+#define MAX_WORKERS 64
+#define MAX_LIDS 64
 
 enum mngt_methods {
 	mngt_method_get = 1,
@@ -63,6 +66,8 @@ float timedifference_sec(struct timeval t0, struct timeval t1);
 const char *get_attribute_name(int attr);
 
 static int drmad_tid = 0x123;
+static int g_nworkers = 1;
+static pthread_barrier_t g_barrier;
 
 typedef struct {
 	char path[64];
@@ -150,7 +155,7 @@ int process_mads(struct mad_worker *w);
 void set_lid_routet_targets(struct mad_worker *w, uint32_t *lids, int n);
 int send_mads(struct mad_worker *w);
 void report_worker_params(struct mad_worker *w, FILE *f);
-void print_statistics(struct mad_worker *w, FILE *f);
+void print_statistics(struct mad_worker *workers, int nworkers, FILE *f);
 int fetch_attribute(struct mad_worker *w);
 
 struct drsmp {
@@ -297,6 +302,9 @@ static int process_opt(void *context, int ch)
 		break;
 	case 'T':
 		w->ibd_timeout = (uint64_t) strtoull(optarg, NULL, 0);
+		break;
+	case 'p':
+		 g_nworkers = (uint64_t) strtoull(optarg, NULL, 0);
 		break;
 	default:
 		return -1;
@@ -559,52 +567,70 @@ void report_worker_params(struct mad_worker *w, FILE *f)
 	fprintf(f, "source queue depth: %d , target queue depth: %d\n", w->source_queue_depth, w->target_queue_depth);
 }
 
-void print_statistics(struct mad_worker *w, FILE *f)
+void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 {
-	int i;
-	int send_mads = 0, ok_mads = 0, errors = 0, timeouts = 0 , total_mads = 0;
+	int i, n;
+	struct mad_worker *w;
+	int send_mads = 0, ok_mads = 0, errors = 0, timeouts = 0 , recv_mads = 0;
+	int total_send_mads = 0, total_ok_mads = 0, total_errors = 0, total_timeouts = 0 , total_recv_mads = 0;
 	uint64_t total_time = 0;
 	int min_latency_us = 0, max_latency_us = 0, avrg_latency_us = 0;
 	float run_time_s;
 
-	run_time_s = timedifference_sec(w->start, w->end);
+	run_time_s = timedifference_sec(workers[0].start, workers[0].end);
+	fprintf(f, "Run time: %.2f\n", run_time_s);
 
-	for (i = 0; i < w->n_targets; ++ i) {
+	for (n = 0; n < g_nworkers; ++n) {
+		w = &workers[n];
 
-		if (!w->targets[i].send_mads)
-			continue;
+		send_mads = ok_mads = errors = timeouts = recv_mads = 0;
+		for (i = 0; i < w->n_targets; ++ i) {
 
-		send_mads += w->targets[i].send_mads;
-		ok_mads += w->targets[i].ok_mads;
-		errors += w->targets[i].errors;
-		timeouts += w->targets[i].timeouts;
+			//if (!w->targets[i].send_mads)
+			//	continue;
 
-		if (!min_latency_us || min_latency_us > w->targets[i].min_latency_us)
-			min_latency_us = w->targets[i].min_latency_us;
-		if (max_latency_us < w->targets[i].max_latency_us)
-			max_latency_us = w->targets[i].max_latency_us;
+			send_mads += w->targets[i].send_mads;
+			ok_mads += w->targets[i].ok_mads;
+			errors += w->targets[i].errors;
+			timeouts += w->targets[i].timeouts;
 
-		total_time += w->targets[i].total_time_us;
+			if (!min_latency_us || min_latency_us > w->targets[i].min_latency_us)
+				min_latency_us = w->targets[i].min_latency_us;
+			if (max_latency_us < w->targets[i].max_latency_us)
+				max_latency_us = w->targets[i].max_latency_us;
+
+			total_time += w->targets[i].total_time_us;
+		}
+
+		recv_mads = ok_mads + errors + timeouts;
+		if (recv_mads > 0 )
+			avrg_latency_us = total_time / recv_mads;
+
+		fprintf(f, "Worker: %d , Local device: %s , port: %d\n", n, strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port);
+		fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  send_mads, ok_mads, timeouts, errors);
+		fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  min_latency_us, max_latency_us, avrg_latency_us);
+		fprintf(f, "	mad/s: %d\n", (int)(recv_mads / run_time_s));
+		fprintf(f, "\n");
+
+		for (i = 0; i < w->n_targets; ++ i) {
+			recv_mads = w->targets[i].ok_mads + w->targets[i].timeouts + w->targets[i].errors;
+			fprintf(f, "	lid: %d\n", w->targets[i].lid);
+			fprintf(f, "		send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  w->targets[i].send_mads, w->targets[i].ok_mads, w->targets[i].timeouts, w->targets[i].errors);
+			fprintf(f, "		latency (us) min: %d , max:%d , average: %d\n",  w->targets[i].min_latency_us, w->targets[i].max_latency_us, w->targets[i].avrg_latency_us);
+			fprintf(f, "		mas/s: %d\n",  (int)(recv_mads / run_time_s));
+			fprintf(f, "\n");
+		}
+
+		total_send_mads += send_mads;
+		total_ok_mads += ok_mads;
+		total_errors += errors;
+		total_timeouts += timeouts;
+		total_recv_mads += recv_mads;
 	}
 
-	total_mads = ok_mads + errors + timeouts;
-	if (total_mads > 0 )
-		avrg_latency_us = total_time / total_mads;
-
-	fprintf(f, "Run time: %.2f\n", run_time_s);
-	fprintf(f, "Local device: %s , port: %d\n", strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port);
-	fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  send_mads, ok_mads, timeouts, errors);
-	fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  min_latency_us, max_latency_us, avrg_latency_us);
-	fprintf(f, "	mas/s: %d\n", (int)(total_mads / run_time_s));
-	fprintf(f, "\n");
-
-	for (i = 0; i < w->n_targets; ++ i) {
-		total_mads = w->targets[i].ok_mads + w->targets[i].timeouts + w->targets[i].errors;
-		fprintf(f, "lid: %d", w->targets[i].lid);
-		fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  w->targets[i].send_mads, w->targets[i].ok_mads, w->targets[i].timeouts, w->targets[i].errors);
-		fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  w->targets[i].min_latency_us, w->targets[i].max_latency_us, w->targets[i].avrg_latency_us);
-		fprintf(f, "	mas/s: %d\n",  (int)(total_mads / run_time_s));
-		fprintf(f, "\n");
+	if (nworkers > 1) {
+		fprintf(f, "Total send mads: %d , ok mads: %d , timeouts: %d , errors %d , mad/s: %d\n",  total_send_mads, total_ok_mads, total_timeouts, total_errors,
+				(int)(total_recv_mads / run_time_s));
 	}
 }
 
@@ -692,13 +718,25 @@ const char *get_attribute_name(int attr)
 	return res;
 }
 
+void *thread_worker(void *ctx)
+{
+	struct mad_worker *pw = (struct mad_worker *)ctx;
+	int ret;
+
+	init_ib_device(pw, ibd_ca, ibd_ca_port);
+
+	ret = pthread_barrier_wait(&g_barrier);
+	process_mads(pw);
+}
+
 int main(int argc, char *argv[])
 {
 	DRPath path;
-//	uint8_t *desc;
 	struct mad_worker w;
-	uint32_t lids[1024] = {};
-	int n_lids = 0;
+	struct mad_worker workers[MAX_WORKERS] = {};
+	pthread_t threads[MAX_WORKERS] = {};
+	uint32_t lids[MAX_LIDS] = {};
+	int i, ret, n_lids = 0;
 
 	const struct ibdiag_opt opts[] = {
 		{"string", 's', 0, NULL, ""},
@@ -708,6 +746,7 @@ int main(int argc, char *argv[])
 		{"mngt_method", 'm', 1, "<method>", ""},
 		{"umad_retries", 'r', 1, "<retries>", ""},
 		{"umad_timeout", 'T', 1, "<timeout ms>", ""},
+		{"n_workers", 'p', 1, "<n workers>", ""},
 		{}
 	};
 	char usage_args[] = "<dlid|dr_path> <attr> [mod]";
@@ -726,6 +765,8 @@ int main(int argc, char *argv[])
 	ibdiag_process_opts(argc, argv, &w, "GKs", opts, process_opt,
 			    usage_args, usage_examples);
 
+	if (g_nworkers < 1 || g_nworkers > MAX_WORKERS)
+		IBPANIC("number of workers is wrong: %d", g_nworkers);
 	check_worker(&w);
 
 	argc -= optind;
@@ -751,40 +792,40 @@ int main(int argc, char *argv[])
 	if (umad_init() < 0)
 		IBPANIC("can't init UMAD library");
 
-	init_ib_device(&w, ibd_ca, ibd_ca_port);
 
 	report_worker_params(&w, stdout);
 
-	set_lid_routet_targets(&w, (uint32_t *)&lids, n_lids);
+	for (i = 0; i < MAX_WORKERS; ++i)
+		memcpy(&workers[i], &w, sizeof w);
 
-	//if (ibdebug > 1)
-	//	xdump(stderr, "before send:\n", w.smp, 256);
+	if (g_nworkers == 1) {
+		init_ib_device(&workers[0], ibd_ca, ibd_ca_port);
+		set_lid_routet_targets(&workers[0], (uint32_t *)lids, n_lids);
+		process_mads(&workers[0]);
+	} else {
+		pthread_barrierattr_t attr;
+		int lids_per_worker = n_lids / g_nworkers;
+		int lids_last_worker = lids_per_worker + n_lids % g_nworkers;
 
-	process_mads(&w);
+		ret = pthread_barrier_init(&g_barrier, &attr, g_nworkers);
+		if (ret)
+			IBPANIC("can't create pthread barrier");
 
-	print_statistics(&w, stdout);
-/*
-	if (!dump_char) {
-		xdump(stdout, NULL, w.mad.smp->data, 64);
-		if (w.mad.smp->status)
-			fprintf(stdout, "SMP status: 0x%x\n",
-				ntohs(w.mad.smp->status));
-		goto exit;
+		for (i = 0; i < g_nworkers; ++i) {
+			set_lid_routet_targets(&workers[i], (uint32_t *)lids + i * lids_per_worker, i != (g_nworkers - 1) ?  lids_per_worker : lids_last_worker);
+			if(pthread_create(&threads[i], NULL, thread_worker, &workers[i])) {
+				IBPANIC("failed to create a thread: %d %m", i);
+			}
+		}
+
+		for (i = 0; i < g_nworkers; ++i)
+			pthread_join(threads[i], NULL);
 	}
-*/
-/*
-	desc = w.mad.smp->data;
-	for (i = 0; i < 64; ++i) {
 
-		if (!desc[i])
-			break;
-		putchar(desc[i]);
-	}
-*/
+	print_statistics(workers, g_nworkers, stdout);
 	putchar('\n');
-//	if (w.mad.smp->status)
-//		fprintf(stdout, "SMP status: 0x%x\n", ntohs(w.mad.smp->status));
 
-	finalize_mad_worker(&w);
+	for (i = 0; i < g_nworkers; ++i)
+		finalize_mad_worker(&workers[i]);
 	return 0;
 }
