@@ -1,4 +1,4 @@
 CC=gcc
 
-smp_mad_stress:
-	$(CC)  -o smp_mad_stress ibdiag_common.c smpdump.c -libumad -libmad -I/usr/include/infiniband
+smp_mad_stress: smpdump.c
+	$(CC)  -o smp_mad_stress ibdiag_common.c smpdump.c -libumad -libmad -lpthread -I/usr/include/infiniband  -std=gnu99 -g -O0
