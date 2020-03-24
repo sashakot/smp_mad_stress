@@ -606,6 +606,12 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 		if (recv_mads > 0 )
 			avrg_latency_us = total_time / recv_mads;
 
+		total_send_mads += send_mads;
+		total_ok_mads += ok_mads;
+		total_errors += errors;
+		total_timeouts += timeouts;
+		total_recv_mads += recv_mads;
+
 		fprintf(f, "Worker: %d , Local device: %s , port: %d\n", n, strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port);
 		fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  send_mads, ok_mads, timeouts, errors);
 		fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  min_latency_us, max_latency_us, avrg_latency_us);
@@ -621,14 +627,9 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 			fprintf(f, "\n");
 		}
 
-		total_send_mads += send_mads;
-		total_ok_mads += ok_mads;
-		total_errors += errors;
-		total_timeouts += timeouts;
-		total_recv_mads += recv_mads;
 	}
 
-	if (nworkers > 1) {
+	if (1 /*nworkers > 1*/) {
 		fprintf(f, "Total send mads: %d , ok mads: %d , timeouts: %d , errors %d , mad/s: %d\n",  total_send_mads, total_ok_mads, total_timeouts, total_errors,
 				(int)(total_recv_mads / run_time_s));
 	}
