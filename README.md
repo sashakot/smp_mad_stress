@@ -19,16 +19,16 @@ $ make
 smp_mad_stress manages a queue of MADs on wire per destination device and SMP window in local device as well. In other words, it limits a number of SMP MADs sent to each destination and total number of MADs sent from local port.
 Send and receive are done from the same thread using "poll" technique.
 
-## Testing resutls
+## Testing results
 
-### SMP MAD laytency
+### SMP MAD latency
 
 Switch: "Quantum" (227.2007.300), SMP: LinearForwardingTable (0x19), Lid route
 
-| Destnation queue depth | MAD/s |
-|------------------------|-------|
-| 1                      | 4500  |
-| 2                      | 5700  |
+| Destination queue depth | MAD/s |
+|-------------------------|-------|
+| 1                       | 4500  |
+| 2                       | 5700  |
 
 Queue depth [3..20] doesn't improve performance, the result is same : 5700 MADs/s. After queue 20 VL15Dropped grows in destination.
 
@@ -77,7 +77,7 @@ Increasing number of workers above 3 doesn't improve performance. Max performanc
 
 ## Conclusions and observations
 
-* Having more than two MADs on wire to the same destination dosen't help.
+* Having more than two MADs on wire to the same destination doesn't help.
 * Local device can send 128 MADs in parallel (1-2 MADs to each destination) without drops. 128 is default size of send queue for QP0 in driver
 * MAD send/recv consume CPU. For reaching maximum, single thread is not enough
 
