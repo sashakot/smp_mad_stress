@@ -57,7 +57,8 @@
 
 enum mngt_methods {
 	mngt_method_get = 1,
-	mngt_method_set = 2
+	mngt_method_set = 2,
+	mngt_method_getresp = 129
 };
 
 float timedifference_msec(struct timeval t0, struct timeval t1);
@@ -571,10 +572,25 @@ void finalize_mad_worker(struct mad_worker *w)
 
 void report_worker_params(struct mad_worker *w, FILE *f)
 {
+	const char *mngt_method_name;
+
 	fprintf(f, "device: %s port %d\n", w->ibd_ca, w->ibd_ca_port);
 	fprintf(f, "umad timeout: %d  retries: %d\n ", w->ibd_timeout, w->ibd_retries);
 	fprintf(f, "mngt class %s (%d)\n ", w->mgmt_class ==  IB_SMI_CLASS? "IB_SMI_CLASS" : "IB_SMI_DIRECT_CLASS", w->mgmt_class);
-	fprintf(f, "mngt method %s (%d)\n ", w->mngt_method == 1 ? "GET" : "SET", w->mngt_method);
+	switch(w->mngt_method) {
+		case mngt_method_get:
+			mngt_method_name = "GET";
+			break;
+		case mngt_method_set:
+			mngt_method_name = "SET";
+			break;
+		case mngt_method_getresp:
+			mngt_method_name = "GETRESP";
+			break;
+		default:
+			mngt_method_name = "Unknown";
+	};
+	fprintf(f, "mngt method %s (%d)\n ", mngt_method_name, w->mngt_method);
 	fprintf(f, "smp attr %s (0x%x)\n ", get_attribute_name(w->smp_attr) , w->smp_attr);
 	fprintf(f, "source queue depth: %d , target queue depth: %d\n", w->source_queue_depth, w->target_queue_depth);
 }
@@ -649,7 +665,7 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 
 void check_worker(const struct mad_worker *w)
 {
-	if (w->mngt_method != 1 && w->mngt_method != 2 )
+	if (w->mngt_method != mngt_method_get && w->mngt_method != mngt_method_set && w->mngt_method != mngt_method_getresp )
 		IBPANIC("wrong mngt method: %d", w->mngt_method);
 	if (w->target_queue_depth > MAX_TARGET_QUEUE_DEPTH)
 		IBPANIC("mad queue depth for destination device is too big: %d , max : %d", w->target_queue_depth, MAX_TARGET_QUEUE_DEPTH);
@@ -756,7 +772,7 @@ int main(int argc, char *argv[])
 		{"queue_depth", 'N', 1, "<source queue_depth>", ""},
 		{"queue_depth", 'n', 1, "<target queue_depth>", ""},
 		{"run_time", 't', 1, "<time>", ""},
-		{"mngt_method", 'm', 1, "<method>", ""},
+		{"mngt_method", 'm', 1, "<method 1: Get; 2: Set; 129: GetResponse>", ""},
 		{"umad_retries", 'r', 1, "<retries>", ""},
 		{"umad_timeout", 'T', 1, "<timeout ms>", ""},
 		{"n_workers", 'p', 1, "<n workers>", ""},
