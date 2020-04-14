@@ -50,7 +50,7 @@
 #include "ibdiag_common.h"
 //#include <infiniband/ibnetdisc.h>
 
-#define MAX_TARGET_QUEUE_DEPTH 512
+#define MAX_TARGET_QUEUE_DEPTH 2048
 #define MAX_SOURCE_QUEUE_DEPTH 2048
 #define MAX_WORKERS 64
 #define MAX_LIDS 64
