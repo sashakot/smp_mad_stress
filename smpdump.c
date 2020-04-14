@@ -573,8 +573,11 @@ void finalize_mad_worker(struct mad_worker *w)
 void report_worker_params(struct mad_worker *w, FILE *f)
 {
 	const char *mngt_method_name;
+	char hostname[1024];
 
-	fprintf(f, "device: %s port %d\n", w->ibd_ca, w->ibd_ca_port);
+	gethostname(hostname, 1024);
+
+	fprintf(f, "host: %s device: %s port %d\n", hostname, w->ibd_ca, w->ibd_ca_port);
 	fprintf(f, "umad timeout: %d  retries: %d\n ", w->ibd_timeout, w->ibd_retries);
 	fprintf(f, "mngt class %s (%d)\n ", w->mgmt_class ==  IB_SMI_CLASS? "IB_SMI_CLASS" : "IB_SMI_DIRECT_CLASS", w->mgmt_class);
 	switch(w->mngt_method) {
