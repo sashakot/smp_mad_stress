@@ -105,3 +105,38 @@ Usage: ./smp_mad_stress [options] <dlid|dr_path> <attr> [mod]
  $ ./build/bin/smpdump -C mlx5_3  -m 2 -N 16  -t 20 -L 9 0x19 1  1
  $ ./smp_mad_stress -r 0 -T 1 -p 1 -m 1 -N 128  -n 10  -t 10 -L 24,18,30,23,34,53,57,58,59,3,56,8,7 0xff23 1
  ```
+
+## Changing VL15 buffer
+
+Source: Yuval Atias
+
+The example below assumes, we use port 0 and don't use VL3
+
+``` bash
+[yuvala@l-fwdev-092 ~]$ s /.autodirect/fwgwork/yuvala/tmp/negev_read_rx_credits.sh /dev/mst/mt4123_pciconf0
+--- Each credit is 128 [B] ---
+Port0 vl15 credits
+0x00000008
+Port0 dynamic credits
+0x00000047
+Port0 vl0 credits
+0x000003ec
+Port0 vl1 credits
+0x000003ec
+Port0 vl2 credits
+0x000003ec
+Port0 vl3 credits
+0x000003ec
+
+s /.autodirect/fwgwork/yuvala/tmp/negev_set_vl15_rx_stat_credits.sh /dev/mst/mt4123_pciconf0 10
+--- Each credit is 128 [B] ---
+setting Port0 vl15 credits to 10
+setting Port0 vl3 credits to 0x100
+
+
+[yuvala@l-fwdev-092 ~]$ s /.autodirect/fwgwork/yuvala/tmp/negev_set_dyn_rx_stat_credits.sh /dev/mst/mt4123_pciconf0 100
+--- Each credit is 128 [B] ---
+setting Port0 dynamic credits to 100
+setting Port0 vl3 credits to 0x100
+
+```
