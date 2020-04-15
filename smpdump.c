@@ -50,6 +50,12 @@
 #include "ibdiag_common.h"
 //#include <infiniband/ibnetdisc.h>
 
+#ifdef HAVE_MPI
+#include <mpi.h>
+
+int g_rank, g_nproc;
+#endif
+
 #define MAX_TARGET_QUEUE_DEPTH 2048
 #define MAX_SOURCE_QUEUE_DEPTH 2048
 #define MAX_WORKERS 64
@@ -141,6 +147,7 @@ struct mad_worker {
 	int timeout_ms;
 	struct timeval start;
 	struct timeval end;
+	int n_mads; // Total number of MADs for sending, -1 : there is no limitation
 
 	/*
 	queue
@@ -307,6 +314,9 @@ static int process_opt(void *context, int ch)
 	case 'p':
 		 g_nworkers = (uint64_t) strtoull(optarg, NULL, 0);
 		break;
+	case 'X':
+		w->n_mads = (uint64_t) strtoull(optarg, NULL, 0);
+		break;
 	default:
 		return -1;
 	}
@@ -337,6 +347,8 @@ int init_mad_worker(struct mad_worker *w)
 	w->portid = -1;
 
 	w->timeout_ms = 0;
+
+	w->n_mads = -1; // -1 : no limit
 	return 0;
 }
 
@@ -418,6 +430,7 @@ int send_mads(struct mad_worker *w)
 	struct drsmp *smp = (struct drsmp *)(umad_get_mad(w->umad));
 	int send_mads = 0;
 
+
 	for (i = 0; i < w->source_queue_depth; ++i) {
 		if (!w->mads_on_wire[i].tid) {
 
@@ -431,12 +444,19 @@ int send_mads(struct mad_worker *w)
 			if (j == w->n_targets)
 				break;
 
+			if (w->n_mads > 0 && target->send_mads >= w->n_mads)
+				continue;
+
 			//printf("Going to send to Lid : %d on wire %d tid 0x%x\n", w->targets[idx].lid, target->on_wire_mads, drmad_tid );
 			if (w->mgmt_class == IB_SMI_DIRECT_CLASS)
 				drsmp_get_init(w->umad, w->targets[idx].path, w->smp_attr, w->smp_mod, w->mngt_method, w->targets[idx].data); // TODO: Fix
 			else
 				smp_get_init(w->umad, w->targets[idx].lid, w->smp_attr, w->smp_mod, w->mngt_method, w->targets[idx].data);
 
+#ifdef HAVE_MPI
+			if (1 == w->n_targets && 11 == g_nworkers)
+				MPI_Barrier(MPI_COMM_WORLD);
+#endif
 			rc = umad_send(w->portid, w->mad_agent, w->umad, IB_MAD_SIZE, w->ibd_timeout, w->ibd_retries);
 			if (rc)
 				IBPANIC("send failed rc : %d", rc);
@@ -490,6 +510,10 @@ int process_mads(struct mad_worker *w)
 
 	gettimeofday(&w->start, NULL);
 
+#ifdef HAVE_MPI
+	MPI_Barrier(MPI_COMM_WORLD);
+#endif
+
 	while (1) {
 		gettimeofday(&current, NULL);
 
@@ -497,7 +521,7 @@ int process_mads(struct mad_worker *w)
 		if (time_left_ms <= 0)
 			goto exit;
 
-		send_mads(w);
+		rc = send_mads(w);
 
 		rc = umad_poll(w->portid, (int)time_left_ms);
 		if (rc == -ETIMEDOUT)
@@ -596,6 +620,11 @@ void report_worker_params(struct mad_worker *w, FILE *f)
 	fprintf(f, "mngt method %s (%d)\n ", mngt_method_name, w->mngt_method);
 	fprintf(f, "smp attr %s (0x%x)\n ", get_attribute_name(w->smp_attr) , w->smp_attr);
 	fprintf(f, "source queue depth: %d , target queue depth: %d\n", w->source_queue_depth, w->target_queue_depth);
+	fprintf(f, "mads for sending: ");
+	if (w->n_mads > 0)
+		fprintf(f, "%d\n", w->n_mads);
+	else
+		fprintf(f, "unlimited\n");
 }
 
 void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
@@ -779,6 +808,7 @@ int main(int argc, char *argv[])
 		{"umad_retries", 'r', 1, "<retries>", ""},
 		{"umad_timeout", 'T', 1, "<timeout ms>", ""},
 		{"n_workers", 'p', 1, "<n workers>", ""},
+		{"n_mads", 'X', 1, "<n mads", ""},
 		{}
 	};
 	char usage_args[] = "<dlid|dr_path> <attr> [mod]";
@@ -791,6 +821,12 @@ int main(int argc, char *argv[])
 		"0xa0 0x11	# NODE INFO, lid 0xa0",
 		NULL
 	};
+
+#ifdef HAVE_MPI
+	MPI_Init(&argc,&argv);
+	MPI_Comm_size(MPI_COMM_WORLD,&g_nproc);
+	MPI_Comm_rank(MPI_COMM_WORLD,&g_rank);
+#endif
 
 	init_mad_worker(&w);
 
@@ -859,5 +895,8 @@ int main(int argc, char *argv[])
 
 	for (i = 0; i < g_nworkers; ++i)
 		finalize_mad_worker(&workers[i]);
+#ifdef HAVE_MPI
+	MPI_Finalize();
+#endif
 	return 0;
 }

@@ -19,6 +19,8 @@ $ make
 smp_mad_stress manages a queue of MADs on wire per destination device and SMP window in local device as well. In other words, it limits a number of SMP MADs sent to each destination and total number of MADs sent from local port.
 Send and receive are done from the same thread using "poll" technique.
 
+The tool can run as distributed application based on MPI (needs compilation with special flag, see example below). In this case, before each  sending all ranks go to a barrier. It will work only if we use single desitnation and single worker.
+
 ## Testing results
 
 ### SMP MAD latency
@@ -97,14 +99,36 @@ Usage: ./smp_mad_stress [options] <dlid|dr_path> <attr> [mod]
 | -m           | managment menthod : 1- SET (default), 2 - GET        |
 | -p           | Number of workers (threads)                          |
 | -L           | Destination lids, comma-separated list               |
+| -X           | Max number of MADs for sending to a destination      |
+
+## How to compile with MPI
+
+``` bash
+$ module load hpcx/v2.6/mofed5.0/gcc
+$ make CFLAGS=-DHAVE_MPI CC=mpicc
+```
 
 ## Examples
 ------
 
-```
+### Non - mpi examples
+
+``` bash
  $ ./build/bin/smpdump -C mlx5_3  -m 2 -N 16  -t 20 -L 9 0x19 1  1
  $ ./smp_mad_stress -r 0 -T 1 -p 1 -m 1 -N 128  -n 10  -t 10 -L 24,18,30,23,34,53,57,58,59,3,56,8,7 0xff23 1
  ```
+
+### MPI examples
+
+``` bash
+$ mpirun --bind-to core --map-by node  -hostfile hostlist  --oversubscribe -np 1  -mca coll ^hcoll /hpc/scrap/users/sashakot/smp_mad_stress/smp_mad_stress  -C mlx5_2  -p 1 -m 1 -N 2048  -n 2048  -T 2 -r 1 -t 10  -X 1 -L 117 0x0020 0
+```
+
+### Usefull commands
+$ssh mngx-orion-01 squeue -u sashakot | grep sashakot | awk '{print $8}' | xargs hostlist -e > hostlist
+``` bash
+
+```
 
 ## Changing VL15 buffer
 
