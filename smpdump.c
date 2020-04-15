@@ -636,6 +636,7 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	uint64_t total_time = 0;
 	int min_latency_us = 0, max_latency_us = 0, avrg_latency_us = 0;
 	float run_time_s;
+	int mads_per_sec = 0;
 
 	run_time_s = timedifference_sec(workers[0].start, workers[0].end);
 	fprintf(f, "Run time: %.2f\n", run_time_s);
@@ -689,10 +690,46 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 
 	}
 
+	mads_per_sec = (int)(total_recv_mads / run_time_s);
 	if (1 /*nworkers > 1*/) {
 		fprintf(f, "Total send mads: %d , ok mads: %d , timeouts: %d , errors %d , mad/s: %d\n",  total_send_mads, total_ok_mads, total_timeouts, total_errors,
-				(int)(total_recv_mads / run_time_s));
+				mads_per_sec);
 	}
+#ifdef HAVE_MPI
+	int *recv_data = NULL;
+	int send_data[5] = {};
+
+	send_data[0] = total_send_mads;
+	send_data[1] = total_ok_mads;
+	send_data[2] = total_timeouts;
+	send_data[3] = total_errors;
+	send_data[4] = mads_per_sec;
+
+	if (!g_rank) {
+		recv_data = calloc(1, 5 * g_nproc * sizeof(MPI_INT));
+		if (!recv_data)
+			IBPANIC("Can't allocate memory for gathering results");
+	}
+
+	MPI_Gather(send_data, 5, MPI_INT, recv_data, 5, MPI_INT, 0, MPI_COMM_WORLD);
+
+	if(!g_rank) {
+		total_send_mads = 0, total_ok_mads = 0, total_errors = 0, total_timeouts = 0 , total_recv_mads = 0, mads_per_sec = 0;
+		for (i = 0 ; i < g_nproc; i++) {
+			total_send_mads += recv_data[i * 5 + 0];
+			total_ok_mads += recv_data[i * 5 + 1];
+			total_errors  += recv_data[i * 5 + 2];
+			total_timeouts += recv_data[i * 5 + 3];
+			mads_per_sec += recv_data[i * 5 + 4];
+		}
+
+		mads_per_sec /= g_nproc;
+
+		fprintf(f, "Total from all nodes , send mads: %d , ok mads: %d , timeouts: %d , errors %d , mad/s: %d\n",  total_send_mads, total_ok_mads, total_timeouts, total_errors,
+				mads_per_sec);
+		free(recv_data);
+	}
+#endif
 }
 
 void check_worker(const struct mad_worker *w)
