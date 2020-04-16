@@ -100,6 +100,7 @@ Usage: ./smp_mad_stress [options] <dlid|dr_path> <attr> [mod]
 | -p           | Number of workers (threads)                          |
 | -L           | Destination lids, comma-separated list               |
 | -X           | Max number of MADs for sending to a destination      |
+| -M           | Print results in MPI frendly way (only rank#0 prints)|
 
 ## How to compile with MPI
 
@@ -121,7 +122,8 @@ $ make CFLAGS=-DHAVE_MPI CC=mpicc
 ### MPI examples
 
 ``` bash
-$ mpirun --bind-to core --map-by node  -hostfile hostlist  --oversubscribe -np 1  -mca coll ^hcoll /hpc/scrap/users/sashakot/smp_mad_stress/smp_mad_stress  -C mlx5_2  -p 1 -m 1 -N 2048  -n 2048  -T 2 -r 1 -t 10  -X 1 -L 117 0x0020 0
+$ mpirun --bind-to core --map-by node  -hostfile hostlist   --oversubscribe -np 20  -mca btl self,vader,tcp -x LD_LIBRARY_PATH -mca pml ob1  -mca coll ^hcoll /hpc/scrap/users/sashakot/smp_mad_stress/smp_mad_stress  -C mlx5_2  -p 1 -m 129 -N 2048  -n 2048  -T 200 -r 1 -t 1 -M  -X 1 -L 117 0xff23 0
+
 ```
 
 ### Usefull commands

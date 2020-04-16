@@ -53,7 +53,7 @@
 #ifdef HAVE_MPI
 #include <mpi.h>
 
-int g_rank, g_nproc;
+static int g_rank, g_nproc;
 #endif
 
 #define MAX_TARGET_QUEUE_DEPTH 2048
@@ -75,6 +75,7 @@ const char *get_attribute_name(int attr);
 static int drmad_tid = 0x123;
 static int g_nworkers = 1;
 static pthread_barrier_t g_barrier;
+static int g_mpi_frendly_output;
 
 typedef struct {
 	char path[64];
@@ -153,6 +154,11 @@ struct mad_worker {
 	queue
 	*/
 	struct mad_operation *mads_on_wire;
+
+	/*
+ 	* Local port attributes
+ 	*/
+	uint16_t base_lid;
 };
 
 int init_mad_worker(struct mad_worker *w);
@@ -317,6 +323,9 @@ static int process_opt(void *context, int ch)
 	case 'X':
 		w->n_mads = (uint64_t) strtoull(optarg, NULL, 0);
 		break;
+	case 'M':
+		g_mpi_frendly_output = 1;
+		break;
 	default:
 		return -1;
 	}
@@ -354,12 +363,21 @@ int init_mad_worker(struct mad_worker *w)
 
 int init_ib_device(struct mad_worker *w, const char *ca, int ca_port)
 {
+	umad_port_t umad_port;
+
 	if (ca)
 		strncpy(w->ibd_ca, ibd_ca,UMAD_CA_NAME_LEN -1);
 	w->ibd_ca_port = ibd_ca_port;
 
 	if ((w->portid = umad_open_port(ibd_ca, ibd_ca_port)) < 0)
 		IBPANIC("can't open UMAD port (%s:%d)", ibd_ca, ibd_ca_port);
+
+	if(umad_get_port(ibd_ca, ibd_ca_port, &umad_port))
+		IBPANIC("can't open UMAD port (%s:%d)", ibd_ca, ibd_ca_port);
+
+	w->base_lid = umad_port.base_lid;
+
+	umad_release_port(&umad_port);
 
 	if ((w->mad_agent = umad_register(w->portid, w->mgmt_class, 1, 0, NULL)) < 0)
 		IBPANIC("Couldn't register agent for SMPs");
@@ -639,7 +657,8 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	int mads_per_sec = 0;
 
 	run_time_s = timedifference_sec(workers[0].start, workers[0].end);
-	fprintf(f, "Run time: %.2f\n", run_time_s);
+	if (!g_mpi_frendly_output)
+		fprintf(f, "Run time: %.2f\n", run_time_s);
 
 	for (n = 0; n < g_nworkers; ++n) {
 		w = &workers[n];
@@ -673,53 +692,68 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 		total_timeouts += timeouts;
 		total_recv_mads += recv_mads;
 
-		fprintf(f, "Worker: %d , Local device: %s , port: %d\n", n, strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port);
-		fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  send_mads, ok_mads, timeouts, errors);
-		fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  min_latency_us, max_latency_us, avrg_latency_us);
-		fprintf(f, "	mad/s: %d\n", (int)(recv_mads / run_time_s));
-		fprintf(f, "\n");
+		if (!g_mpi_frendly_output) {
+			fprintf(f, "Worker: %d , Local device: %s , port: %d\n", n, strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port);
+			fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  send_mads, ok_mads, timeouts, errors);
+			fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  min_latency_us, max_latency_us, avrg_latency_us);
+			fprintf(f, "	mad/s: %d\n", (int)(recv_mads / run_time_s));
+			fprintf(f, "\n");
+		}
 
 		for (i = 0; i < w->n_targets; ++ i) {
 			recv_mads = w->targets[i].ok_mads + w->targets[i].timeouts + w->targets[i].errors;
-			fprintf(f, "	lid: %d\n", w->targets[i].lid);
-			fprintf(f, "		send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  w->targets[i].send_mads, w->targets[i].ok_mads, w->targets[i].timeouts, w->targets[i].errors);
-			fprintf(f, "		latency (us) min: %d , max:%d , average: %d\n",  w->targets[i].min_latency_us, w->targets[i].max_latency_us, w->targets[i].avrg_latency_us);
-			fprintf(f, "		mad/s: %d\n",  (int)(recv_mads / run_time_s));
-			fprintf(f, "\n");
+
+			if (!g_mpi_frendly_output) {
+				fprintf(f, "	lid: %d\n", w->targets[i].lid);
+				fprintf(f, "		send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  w->targets[i].send_mads, w->targets[i].ok_mads, w->targets[i].timeouts, w->targets[i].errors);
+				fprintf(f, "		latency (us) min: %d , max:%d , average: %d\n",  w->targets[i].min_latency_us, w->targets[i].max_latency_us, w->targets[i].avrg_latency_us);
+				fprintf(f, "		mad/s: %d\n",  (int)(recv_mads / run_time_s));
+				fprintf(f, "\n");
+			}
 		}
 
 	}
 
 	mads_per_sec = (int)(total_recv_mads / run_time_s);
-	if (1 /*nworkers > 1*/) {
+	if (!g_mpi_frendly_output) {
 		fprintf(f, "Total send mads: %d , ok mads: %d , timeouts: %d , errors %d , mad/s: %d\n",  total_send_mads, total_ok_mads, total_timeouts, total_errors,
 				mads_per_sec);
 	}
 #ifdef HAVE_MPI
+
+#define MPI_DATA_FIELDS_NUM 6
 	int *recv_data = NULL;
-	int send_data[5] = {};
+	int send_data[MPI_DATA_FIELDS_NUM] = {};
 
 	send_data[0] = total_send_mads;
 	send_data[1] = total_ok_mads;
 	send_data[2] = total_timeouts;
 	send_data[3] = total_errors;
 	send_data[4] = mads_per_sec;
+	send_data[5] = w->base_lid;;
 
 	if (!g_rank) {
-		recv_data = calloc(1, 5 * g_nproc * sizeof(MPI_INT));
+		recv_data = calloc(1, MPI_DATA_FIELDS_NUM * g_nproc * sizeof(MPI_INT));
 		if (!recv_data)
 			IBPANIC("Can't allocate memory for gathering results");
 	}
 
-	MPI_Gather(send_data, 5, MPI_INT, recv_data, 5, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Gather(send_data, MPI_DATA_FIELDS_NUM, MPI_INT, recv_data, MPI_DATA_FIELDS_NUM, MPI_INT, 0, MPI_COMM_WORLD);
 
 	if(!g_rank) {
 		total_send_mads = 0, total_ok_mads = 0, total_errors = 0, total_timeouts = 0 , total_recv_mads = 0, mads_per_sec = 0;
 		for (i = 0 ; i < g_nproc; i++) {
+			int rank_errors = recv_data[i * 5 + 2];
+			int rank_timeouts = recv_data[i * 5 + 3];
+
+			if(rank_errors || rank_timeouts)
+				fprintf(f, "lid %d, errors %d, timeouts %d\n", recv_data[i * 5 + 5], rank_errors, rank_timeouts);
+
 			total_send_mads += recv_data[i * 5 + 0];
 			total_ok_mads += recv_data[i * 5 + 1];
-			total_errors  += recv_data[i * 5 + 2];
-			total_timeouts += recv_data[i * 5 + 3];
+			total_errors  += rank_errors;
+			total_timeouts += rank_timeouts;
 			mads_per_sec += recv_data[i * 5 + 4];
 		}
 
@@ -846,6 +880,7 @@ int main(int argc, char *argv[])
 		{"umad_timeout", 'T', 1, "<timeout ms>", ""},
 		{"n_workers", 'p', 1, "<n workers>", ""},
 		{"n_mads", 'X', 1, "<n mads", ""},
+		{"MPI frendly", 'M', 0, NULL, ""},
 		{}
 	};
 	char usage_args[] = "<dlid|dr_path> <attr> [mod]";
@@ -898,7 +933,8 @@ int main(int argc, char *argv[])
 		IBPANIC("can't init UMAD library");
 
 
-	report_worker_params(&w, stdout);
+	if (!g_mpi_frendly_output)
+		report_worker_params(&w, stdout);
 
 	for (i = 0; i < MAX_WORKERS; ++i)
 		memcpy(&workers[i], &w, sizeof w);
@@ -928,7 +964,6 @@ int main(int argc, char *argv[])
 	}
 
 	print_statistics(workers, g_nworkers, stdout);
-	putchar('\n');
 
 	for (i = 0; i < g_nworkers; ++i)
 		finalize_mad_worker(&workers[i]);
