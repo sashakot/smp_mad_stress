@@ -376,6 +376,7 @@ int init_ib_device(struct mad_worker *w, const char *ca, int ca_port)
 		IBPANIC("can't open UMAD port (%s:%d)", ibd_ca, ibd_ca_port);
 
 	w->base_lid = umad_port.base_lid;
+	//printf("base lid %d\n", w->base_lid);
 
 	umad_release_port(&umad_port);
 
@@ -655,6 +656,7 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	int min_latency_us = 0, max_latency_us = 0, avrg_latency_us = 0;
 	float run_time_s;
 	int mads_per_sec = 0;
+	int base_lid;
 
 	run_time_s = timedifference_sec(workers[0].start, workers[0].end);
 	if (!g_mpi_frendly_output)
@@ -662,6 +664,9 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 
 	for (n = 0; n < g_nworkers; ++n) {
 		w = &workers[n];
+
+		if (!n)
+			base_lid =w->base_lid;
 
 		send_mads = ok_mads = errors = timeouts = recv_mads = 0;
 		for (i = 0; i < w->n_targets; ++ i) {
@@ -693,7 +698,7 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 		total_recv_mads += recv_mads;
 
 		if (!g_mpi_frendly_output) {
-			fprintf(f, "Worker: %d , Local device: %s , port: %d\n", n, strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port);
+			fprintf(f, "Worker: %d , Local device: %s , port: %d base lid: %d\n", n, strlen(w->ibd_ca) ? w->ibd_ca : "Default", w->ibd_ca_port, w->base_lid);
 			fprintf(f, "	send mads: %d , ok mads: %d , timeouts: %d , errors %d\n",  send_mads, ok_mads, timeouts, errors);
 			fprintf(f, "	latency (us) min: %d , max:%d , average: %d\n",  min_latency_us, max_latency_us, avrg_latency_us);
 			fprintf(f, "	mad/s: %d\n", (int)(recv_mads / run_time_s));
@@ -722,6 +727,7 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 #ifdef HAVE_MPI
 
 #define MPI_DATA_FIELDS_NUM 6
+
 	int *recv_data = NULL;
 	int send_data[MPI_DATA_FIELDS_NUM] = {};
 
@@ -730,10 +736,10 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	send_data[2] = total_timeouts;
 	send_data[3] = total_errors;
 	send_data[4] = mads_per_sec;
-	send_data[5] = w->base_lid;;
+	send_data[5] = base_lid;
 
 	if (!g_rank) {
-		recv_data = calloc(1, MPI_DATA_FIELDS_NUM * g_nproc * sizeof(MPI_INT));
+		recv_data = calloc(1, g_nproc * sizeof(send_data));
 		if (!recv_data)
 			IBPANIC("Can't allocate memory for gathering results");
 	}
@@ -742,7 +748,7 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	MPI_Gather(send_data, MPI_DATA_FIELDS_NUM, MPI_INT, recv_data, MPI_DATA_FIELDS_NUM, MPI_INT, 0, MPI_COMM_WORLD);
 
 	if(!g_rank) {
-		total_send_mads = 0, total_ok_mads = 0, total_errors = 0, total_timeouts = 0 , total_recv_mads = 0, mads_per_sec = 0;
+		total_send_mads = 0, total_ok_mads = 0, total_errors = 0, total_timeouts = 0, total_recv_mads = 0, mads_per_sec = 0;
 		for (i = 0 ; i < g_nproc; i++) {
 			int rank_errors = recv_data[i * 5 + 2];
 			int rank_timeouts = recv_data[i * 5 + 3];
