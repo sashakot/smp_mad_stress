@@ -130,7 +130,7 @@ $ssh mngx-orion-01 squeue -u sashakot | grep sashakot | awk '{print $8}' | xargs
 
 ```
 
-## Changing VL15 buffer
+## Changing VL15 buffer for CX-5/6
 
 Source: Yuval Atias
 
@@ -162,5 +162,39 @@ setting Port0 vl3 credits to 0x100
 --- Each credit is 128 [B] ---
 setting Port0 dynamic credits to 100
 setting Port0 vl3 credits to 0x100
+
+```
+
+## Changing VL15 buffer for CX-4
+
+Done, both for ConnectX-4 and ConnectX-6 you can use values of credits between 8-0x100.
+Better to do the configuration when there is no traffic and fw reset to return back to default.
+
+``` bash
+
+[yuvala@l-fwdev-033 ~]$ s /.autodirect/fwgwork/yuvala/tmp/shomron_read_rx_credits.sh /dev/mst/mt4115_pciconf0
+--- Each credit is 128 [B] ---
+Port0 vl15 credits
+0x00000008
+Port0 dynamic credits
+0x00000047
+Port0 vl0 credits
+0x000001ec
+Port0 vl1 credits
+0x000001ec
+Port0 vl2 credits
+0x000001ec
+Port0 vl3 credits
+0x000001ec
+
+[yuvala@l-fwdev-033 ~]$ s /.autodirect/fwgwork/yuvala/tmp/shomron_set_rx_dyn_credits.sh /dev/mst/mt4115_pciconf0 40
+--- Each credit is 128 [B] ---
+setting Port0 dynamic credits to 40
+setting Port0 vl3 credits to 0x20
+
+[yuvala@l-fwdev-033 ~]$ s /.autodirect/fwgwork/yuvala/tmp/shomron_set_vl15_rx_stat_credits.sh /dev/mst/mt4115_pciconf0 0x100
+--- Each credit is 128 [B] ---
+setting Port0 vl15 credits to 0x100
+setting Port0 vl3 credits to 0x20
 
 ```
