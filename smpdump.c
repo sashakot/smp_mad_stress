@@ -156,8 +156,8 @@ struct mad_worker {
 	struct mad_operation *mads_on_wire;
 
 	/*
- 	* Local port attributes
- 	*/
+	 * Local port attributes
+	 */
 	uint16_t base_lid;
 };
 
