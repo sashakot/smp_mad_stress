@@ -324,7 +324,9 @@ static int process_opt(void *context, int ch)
 		w->n_mads = (uint64_t) strtoull(optarg, NULL, 0);
 		break;
 	case 'M':
+#ifdef HAVE_MPI
 		g_mpi_frendly_output = 1;
+#endif
 		break;
 	default:
 		return -1;
@@ -480,8 +482,11 @@ int send_mads(struct mad_worker *w)
 			if (rc)
 				IBPANIC("send failed rc : %d", rc);
 
-			gettimeofday(&w->mads_on_wire[i].start, NULL);
-			w->mads_on_wire[i].tid = smp->tid;
+			// In case of get resp we don't wait for response
+			if (!w->mngt_method == mngt_method_getresp) {
+				gettimeofday(&w->mads_on_wire[i].start, NULL);
+				w->mads_on_wire[i].tid = smp->tid;
+			}
 			w->mads_on_wire[i].target = target;
 			w->last_device = idx;
 			target->on_wire_mads++;
@@ -527,11 +532,10 @@ int process_mads(struct mad_worker *w)
 			IBPANIC("fetch attribute value is failed");
 	}
 
-	gettimeofday(&w->start, NULL);
-
 #ifdef HAVE_MPI
 	MPI_Barrier(MPI_COMM_WORLD);
 #endif
+	gettimeofday(&w->start, NULL);
 
 	while (1) {
 		gettimeofday(&current, NULL);
@@ -541,6 +545,9 @@ int process_mads(struct mad_worker *w)
 			goto exit;
 
 		rc = send_mads(w);
+		if (w->mngt_method == mngt_method_getresp)
+			// This is a special case, we just send, don't wait for response
+			continue;
 
 		rc = umad_poll(w->portid, (int)time_left_ms);
 		if (rc == -ETIMEDOUT)
