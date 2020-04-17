@@ -483,7 +483,7 @@ int send_mads(struct mad_worker *w)
 				IBPANIC("send failed rc : %d", rc);
 
 			// In case of get resp we don't wait for response
-			if (!w->mngt_method == mngt_method_getresp) {
+			if (w->mngt_method != mngt_method_getresp) {
 				gettimeofday(&w->mads_on_wire[i].start, NULL);
 				w->mads_on_wire[i].tid = smp->tid;
 			}
