@@ -473,7 +473,7 @@ int send_mads(struct mad_worker *w)
 				smp_get_init(w->umad, w->targets[idx].lid, w->smp_attr, w->smp_mod, w->mngt_method, w->targets[idx].data);
 
 #ifdef HAVE_MPI
-			if (1 == w->n_targets && 11 == g_nworkers)
+			if (1 == w->n_targets && 1 == g_nworkers)
 				MPI_Barrier(MPI_COMM_WORLD);
 #endif
 			rc = umad_send(w->portid, w->mad_agent, w->umad, IB_MAD_SIZE, w->ibd_timeout, w->ibd_retries);
