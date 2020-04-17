@@ -666,13 +666,10 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 		w = &workers[n];
 
 		if (!n)
-			base_lid =w->base_lid;
+			base_lid =w->base_lid; // Use base lid of the first worker
 
 		send_mads = ok_mads = errors = timeouts = recv_mads = 0;
 		for (i = 0; i < w->n_targets; ++ i) {
-
-			//if (!w->targets[i].send_mads)
-			//	continue;
 
 			send_mads += w->targets[i].send_mads;
 			ok_mads += w->targets[i].ok_mads;
@@ -726,17 +723,25 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	}
 #ifdef HAVE_MPI
 
-#define MPI_DATA_FIELDS_NUM 6
+#define MPI_DATA_FIELDS_NUM		6
+
+#define MPI_DATA_IDX_SEND_MADS		0
+#define MPI_DATA_IDX_OK_MADS		1
+#define MPI_DATA_IDX_TIMEOUTS		2
+#define MPI_DATA_IDX_ERRORS		3
+#define MPI_DATA_IDX_MADS_PER_SEC	4
+#define MPI_DATA_IDX_BASE_LID		5
+
 
 	int *recv_data = NULL;
-	int send_data[MPI_DATA_FIELDS_NUM] = {};
+	int send_data[MPI_DATA_FIELDS_NUM]	= {};
 
-	send_data[0] = total_send_mads;
-	send_data[1] = total_ok_mads;
-	send_data[2] = total_timeouts;
-	send_data[3] = total_errors;
-	send_data[4] = mads_per_sec;
-	send_data[5] = base_lid;
+	send_data[MPI_DATA_IDX_SEND_MADS]	= total_send_mads;
+	send_data[MPI_DATA_IDX_OK_MADS]		= total_ok_mads;
+	send_data[MPI_DATA_IDX_TIMEOUTS]	= total_timeouts;
+	send_data[MPI_DATA_IDX_ERRORS]		= total_errors;
+	send_data[MPI_DATA_IDX_MADS_PER_SEC]	= mads_per_sec;
+	send_data[MPI_DATA_IDX_BASE_LID]	= base_lid;
 
 	if (!g_rank) {
 		recv_data = calloc(1, g_nproc * sizeof(send_data));
@@ -750,17 +755,18 @@ void print_statistics(struct mad_worker *workers, int nworkers, FILE *f)
 	if(!g_rank) {
 		total_send_mads = 0, total_ok_mads = 0, total_errors = 0, total_timeouts = 0, total_recv_mads = 0, mads_per_sec = 0;
 		for (i = 0 ; i < g_nproc; i++) {
-			int rank_errors = recv_data[i * 5 + 2];
-			int rank_timeouts = recv_data[i * 5 + 3];
+			int cell_idx = i * MPI_DATA_FIELDS_NUM;
+			int rank_errors = recv_data[cell_idx  + MPI_DATA_IDX_ERRORS];
+			int rank_timeouts = recv_data[cell_idx + MPI_DATA_IDX_TIMEOUTS];
 
 			if(rank_errors || rank_timeouts)
-				fprintf(f, "lid %d, errors %d, timeouts %d\n", recv_data[i * 5 + 5], rank_errors, rank_timeouts);
+				fprintf(f, "lid %d, errors %d, timeouts %d\n", recv_data[cell_idx + MPI_DATA_IDX_BASE_LID], rank_errors, rank_timeouts);
 
-			total_send_mads += recv_data[i * 5 + 0];
-			total_ok_mads += recv_data[i * 5 + 1];
+			total_send_mads += recv_data[cell_idx + MPI_DATA_IDX_SEND_MADS];
+			total_ok_mads += recv_data[cell_idx + MPI_DATA_IDX_OK_MADS];
 			total_errors  += rank_errors;
 			total_timeouts += rank_timeouts;
-			mads_per_sec += recv_data[i * 5 + 4];
+			mads_per_sec += recv_data[cell_idx + MPI_DATA_IDX_MADS_PER_SEC];
 		}
 
 		mads_per_sec /= g_nproc;
