@@ -50,6 +50,7 @@
 #include "ibdiag_common.h"
 //#include <infiniband/ibnetdisc.h>
 
+#include <liburing.h>
 #ifdef HAVE_MPI
 #include <mpi.h>
 
@@ -919,6 +920,14 @@ int main(int argc, char *argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD,&g_rank);
 #endif
 
+	struct io_uring ring;
+
+	ret = io_uring_queue_init(8, &ring, 0);
+	if (ret) {
+		fprintf(stderr, "Unable to setup io_uring: %s\n", strerror(-ret));
+		return 1;
+	}
+
 	init_mad_worker(&w);
 
 	ibdiag_process_opts(argc, argv, &w, "GKs", opts, process_opt,
@@ -989,5 +998,7 @@ int main(int argc, char *argv[])
 #ifdef HAVE_MPI
 	MPI_Finalize();
 #endif
+
+	io_uring_queue_exit(&ring);
 	return 0;
 }
